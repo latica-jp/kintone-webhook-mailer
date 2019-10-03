@@ -1,0 +1,31 @@
+{
+  "kintone": {
+    "domain": "YOUR_DOMAIN.cybozu.com",
+    "apps": [
+      {
+        "type": "source",
+        "id": SOURCE_APP_ID,
+        "types": [
+          "UPDATE_STATUS"
+        ]
+      },
+      {
+        "type": "template",
+        "id": TEMPLATE_APP_ID,
+        "apiToken": "TEMPLATE_APP_API_TOKEN"
+      }
+    ]
+  },
+  "smtpServers": [
+    {
+      "name": "default",
+      "host": "YOUR_SMTP_HOST",
+      "port": PORT_NUMBER,
+      "secure": false,
+      "auth": {
+        "user": "SMTP_AUTH_USER",
+        "pass": "SMTP_AUTH_PASS"
+      }
+    }
+  ]
+}
