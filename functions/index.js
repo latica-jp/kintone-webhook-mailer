@@ -6,7 +6,7 @@ const config = require('./config.json')
 
 const sendMail = async (smtpName, mailOptions) => {
   const smtpOptions = config.smtpServers.find(server => server.name === smtpName)
-  if (!smtpOptions) return null
+  if (!smtpOptions) throw new Error('No SMTP config')
   const transporter = mailer.createTransport(smtpOptions)
   return await transporter.sendMail(mailOptions)
 }
@@ -35,19 +35,51 @@ const composeAndSendMail = async requestBody => {
     subject: template.subject,
     text: template.body,
   }
-  await sendMail('default', mailOptions)
+  return await sendMail('default', mailOptions)
 }
 
-const fetchTemplateRecord = async () => {
-  const templateApp = config.kintone.apps.find(app => app.type === 'template')
-  const { id, apiToken } = templateApp
+const infoFields = ['info', 'accepted', 'rejected', 'response', 'messageId']
+const createLogInfoRecord = info =>
+  Object.entries({ ...info, info }).reduce(
+    (acc, [key, value]) =>
+      infoFields.includes(key) ? { ...acc, [key]: { value: JSON.stringify(value) } } : acc,
+    {}
+  )
+
+const logInfo = async info => {
+  const logApp = getAppConfig('log')
+  if (!logApp) throw new Error('No log app config')
+  const { id, apiToken } = logApp
+  if (!id || !apiToken) throw new Error('Missing log app info')
+  try {
+    const record = getKintoneRecord(apiToken)
+    await record.addRecord({ app: id, record: createLogInfoRecord(info) })
+  } catch (error) {
+    console.error(error)
+    throw new Error(error)
+  }
+}
+
+const getAppConfig = type => {
+  return config.kintone.apps.find(app => app.type === type)
+}
+
+const getKintoneRecord = apiToken => {
   const auth = new kintoneJSSDK.Auth()
   auth.setApiToken({ apiToken })
   const connection = new kintoneJSSDK.Connection({ auth, domain: config.kintone.domain })
-  const record = new kintoneJSSDK.Record({ connection })
+  return new kintoneJSSDK.Record({ connection })
+}
+
+const fetchTemplateRecord = async () => {
+  const templateApp = getAppConfig('template')
+  if (!templateApp) throw new Error('No template app config')
+  const { id, apiToken } = templateApp
+  if (!id || !apiToken) throw new Error('Missing template app info')
   try {
-    const response = await record.getRecords({ app: Number(id) })
-    return (response.records || [])[0]
+    const record = getKintoneRecord(apiToken)
+    const response = await record.getRecords({ app: id })
+    return response.records[0] || { error: `No template record on app ${id}` }
   } catch (error) {
     console.error(error)
     throw new Error(error)
@@ -70,20 +102,25 @@ const checkHookTypes = requestBody => {
 }
 
 exports.receiveHook = functions.https.onRequest(async (request, response) => {
-  if (!checkUrlDomain(request.body)) {
-    console.error('Bad Request')
-    response.status(400).send('Bad Request')
-    return
+  try {
+    if (!checkUrlDomain(request.body)) {
+      console.error('Bad Request')
+      response.status(400).send('Bad Request')
+      return
+    }
+
+    if (!checkHookTypes(request.body)) {
+      const message = `Ignore hook ${request.body.type}`
+      console.info(message)
+      response.status(200).send(message)
+      return
+    }
+
+    const info = await composeAndSendMail(request.body)
+    await logInfo(info)
+    response.status(200).send(info)
+  } catch (error) {
+    console.error(error)
+    response.status(400).send(error)
   }
-
-  if (!checkHookTypes(request.body)) {
-    const message = `Ignore hook ${request.body.type}`
-    console.warn(message)
-    response.status(200).send(message)
-    return
-  }
-
-  await composeAndSendMail(request.body)
-
-  response.send('Hello from Firebase!')
 })
